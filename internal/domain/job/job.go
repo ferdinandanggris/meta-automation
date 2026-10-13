@@ -32,13 +32,24 @@ func New(id, businessID, name string) (*Job, error) {
 	name = strings.TrimSpace(name)
 
 	if id == "" {
-		return nil, errors.New("job ID wajib diisi")
+		return nil, &ValidationError{
+			Field:   "id",
+			Message: "wajib diisi",
+		}
 	}
+
 	if businessID == "" {
-		return nil, errors.New("business ID wajib diisi")
+		return nil, &ValidationError{
+			Field:   "business_id",
+			Message: "wajib diisi",
+		}
 	}
+
 	if name == "" {
-		return nil, errors.New("nama WABA wajib diisi")
+		return nil, &ValidationError{
+			Field:   "name",
+			Message: "wajib diisi",
+		}
 	}
 
 	return &Job{
@@ -56,6 +67,15 @@ func (j *Job) Fail() error {
 	}
 
 	j.status = StatusFailed
+	return nil
+}
+
+func (j *Job) Cancel() error {
+	if j.status != StatusQueued && j.status != StatusRunning {
+		return errors.New("job hanya bisa dibatalkan dari queued atau running")
+	}
+
+	j.status = StatusCancelled
 	return nil
 }
 
@@ -79,4 +99,22 @@ func (j *Job) Start() error {
 
 	j.status = StatusRunning
 	return nil
+}
+
+type Snapshot struct {
+	ID         string
+	BusinessID string
+	Name       string
+	Status     Status
+	CreatedAt  time.Time
+}
+
+func (j *Job) Snapshot() Snapshot {
+	return Snapshot{
+		ID:         j.ID,
+		BusinessID: j.BusinessID,
+		Name:       j.Name,
+		Status:     j.status,
+		CreatedAt:  j.CreatedAt,
+	}
 }

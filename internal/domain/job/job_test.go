@@ -111,3 +111,102 @@ func TestStart(t *testing.T) {
 		t.Fatal("memulai Job yang sudah running harus ditolak")
 	}
 }
+
+func TestFail(t *testing.T) {
+	task, err := New("job-001", "123456", "Waba Percobaan")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := task.Fail(); err == nil {
+		t.Fatal("job queued tidak boleh langsung menjadi failed")
+	}
+
+	if task.Status() != StatusQueued {
+		t.Fatal("transisi yang ditolak tidak boleh mengubah status")
+	}
+
+	if err := task.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := task.Fail(); err != nil {
+		t.Fatalf("Fail() gagal: %v", err)
+	}
+
+	if task.Status() != StatusFailed {
+		t.Errorf("status = %q, ingin %q", task.Status(), StatusFailed)
+	}
+
+	if err := task.Fail(); err == nil {
+		t.Error("job failed tidak boleh gagal ulang")
+	}
+}
+
+func TestCancel(t *testing.T) {
+	tests := []struct {
+		name  string
+		start bool
+	}{
+		{name: "batalkan queued"},
+		{name: "batalkan running", start: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task, err := New("job-001", "123456", "WABA Percobaan")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tt.start {
+				if err := task.Start(); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := task.Cancel(); err != nil {
+				t.Fatalf("Cancel() gagal: %v", err)
+			}
+
+			if task.Status() != StatusCancelled {
+				t.Errorf("status = %q, ingin %q", task.Status(), StatusCancelled)
+			}
+
+			if err := task.Cancel(); err == nil {
+				t.Error("pembatalan ulang harus ditolak")
+			}
+
+			if err := task.Start(); err == nil {
+				t.Error("job cancelled tidak boleh dimulai")
+			}
+		})
+	}
+}
+
+func TestSnapshotDoesNotChangeWithJob(t *testing.T) {
+	task, err := New("job-001", "123456", "WABA Percobaan")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := task.Snapshot()
+
+	if err := task.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	if snapshot.Status != StatusQueued {
+		t.Error("snapshot lama seharusnya tetap queued")
+	}
+
+	if task.Snapshot().Status != StatusRunning {
+		t.Error("snapshot baru seharusnya running")
+	}
+
+	snapshot.Name = "Nama diubah"
+
+	if task.Name != "WABA Percobaan" {
+		t.Error("mengubah snapshot tidak boleh mengubah Job")
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"meta-automation/internal/application/onboarding"
+	"meta-automation/internal/infrastructure/browser"
 	"meta-automation/internal/infrastructure/memory"
 	"meta-automation/internal/infrastructure/random"
 	"meta-automation/internal/transport/httpapi"
@@ -20,7 +21,7 @@ type demoBrowser struct{}
 
 func (demoBrowser) PrepareWABA(
 	ctx context.Context,
-	businessID, name string,
+	jobID, businessID, name string,
 ) error {
 	return nil
 }
@@ -31,21 +32,33 @@ func main() {
 		log.Fatal("META_AUTOMATION_API_KEY wajib diisi")
 	}
 
-	store := memory.NewJobStore()
-	ids := random.NewIDGenerator()
-	service := onboarding.NewService(demoBrowser{}, store, ids)
-	queue := onboarding.NewQueue(service)
-
-	task, err := service.Create("123456", "WABA Percobaan")
+	session, err := browser.NewSession(
+		context.Background(),
+		os.Getenv("META_BROWSER_PATH"),
+		".local/browser-profile",
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := queue.Enqueue(context.Background(), task); err != nil {
-		log.Fatal(err)
+	defer func() {
+		if err := session.Close(); err != nil {
+			log.Printf("tutup browser gagal: %v", err)
+		}
+	}()
+
+	if err := session.Start(); err != nil {
+		log.Printf("mulai browser gagal: %v", err)
+		return
 	}
 
-	log.Printf("Job demo dibuat: %s", task.ID)
+	store := memory.NewJobStore()
+	ids := random.NewIDGenerator()
+	service := onboarding.NewService(session, store, ids)
+	queue := onboarding.NewQueue(service)
+
+	submitter := onboarding.NewSubmitter(service, queue)
+	idempotentSubmitter := onboarding.NewIdempotentSubmitter(submitter)
 
 	workerCtx, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
@@ -57,8 +70,6 @@ func main() {
 			log.Printf("job gagal: %v", err)
 		})
 	}()
-	submitter := onboarding.NewSubmitter(service, queue)
-	idempotentSubmitter := onboarding.NewIdempotentSubmitter(submitter)
 	server := &http.Server{
 		Addr:              "127.0.0.1:8091",
 		Handler:           httpapi.NewHandler(service, idempotentSubmitter, apiKey),

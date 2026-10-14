@@ -8,7 +8,10 @@ import (
 )
 
 type Browser interface {
-	PrepareWABA(ctx context.Context, businessID, name string) error
+	PrepareWABA(
+		ctx context.Context,
+		jobID, businessID, name string,
+	) error
 }
 
 type Service struct {
@@ -52,6 +55,7 @@ func (s *Service) Run(ctx context.Context, task *job.Job) error {
 
 	if err := s.browser.PrepareWABA(
 		ctx,
+		task.ID,
 		task.BusinessID,
 		task.Name,
 	); err != nil {

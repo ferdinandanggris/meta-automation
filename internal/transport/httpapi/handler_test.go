@@ -360,6 +360,24 @@ func TestCreateJobMapsApplicationErrors(t *testing.T) {
 	}
 }
 
+type countingSubmission struct {
+	calls int
+}
+
+func (s *countingSubmission) Submit(
+	ctx context.Context,
+	businessID, name string,
+) (job.Snapshot, error) {
+	s.calls++
+
+	return job.Snapshot{
+		ID:         "job-001",
+		BusinessID: businessID,
+		Name:       name,
+		Status:     job.StatusQueued,
+	}, nil
+}
+
 type countingJobSubmitter struct {
 	calls int
 }
@@ -402,5 +420,104 @@ func TestCreateJobWithoutAPIKeyDoesNotSubmit(t *testing.T) {
 
 	if submitter.calls != 0 {
 		t.Error("request tanpa API key tidak boleh membuat Job")
+	}
+}
+
+func TestCreateJobReusesIDAndRejectsConflictingInput(t *testing.T) {
+	next := &countingSubmission{}
+	submitter := onboarding.NewIdempotentSubmitter(next)
+
+	handler := NewHandler(
+		fakeJobReader{},
+		submitter,
+		"test-key",
+	)
+
+	send := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/jobs/waba",
+			strings.NewReader(body),
+		)
+		request.Header.Set("Authorization", "Bearer test-key")
+		request.Header.Set("Idempotency-Key", "request-001")
+		request.Header.Set("Content-Type", "application/json")
+
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+
+		return response
+	}
+
+	body := `{"business_id":"123456","name":"WABA Pertama"}`
+
+	first := send(body)
+	second := send(body)
+
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("request pertama = %d, ingin 202", first.Code)
+	}
+
+	if second.Code != http.StatusAccepted {
+		t.Fatalf("retry = %d, ingin 202", second.Code)
+	}
+
+	var firstBody, secondBody struct {
+		JobID string `json:"job_id"`
+	}
+
+	if err := json.Unmarshal(first.Body.Bytes(), &firstBody); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := json.Unmarshal(second.Body.Bytes(), &secondBody); err != nil {
+		t.Fatal(err)
+	}
+
+	if firstBody.JobID == "" || firstBody.JobID != secondBody.JobID {
+		t.Error("retry harus mengembalikan ID yang sama dan tidak kosong")
+	}
+
+	conflict := send(
+		`{"business_id":"123456","name":"WABA Berbeda"}`,
+	)
+
+	if conflict.Code != http.StatusConflict {
+		t.Errorf("request konflik = %d, ingin 409", conflict.Code)
+	}
+
+	if next.calls != 1 {
+		t.Errorf("application dipanggil %d kali, ingin 1", next.calls)
+	}
+}
+
+func TestCreateJobRequiresIdempotencyKey(t *testing.T) {
+	next := &countingSubmission{}
+	submitter := onboarding.NewIdempotentSubmitter(next)
+
+	handler := NewHandler(
+		fakeJobReader{},
+		submitter,
+		"test-key",
+	)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/jobs/waba",
+		strings.NewReader(
+			`{"business_id":"123456","name":"WABA Percobaan"}`,
+		),
+	)
+	request.Header.Set("Authorization", "Bearer test-key")
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Errorf("status HTTP = %d, ingin 400", response.Code)
+	}
+
+	if next.calls != 0 {
+		t.Error("request tanpa Idempotency-Key tidak boleh membuat Job")
 	}
 }

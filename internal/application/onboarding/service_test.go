@@ -9,6 +9,7 @@ import (
 )
 
 type fakeBrowser struct {
+	jobID      string
 	businessID string
 	name       string
 	calls      int
@@ -17,8 +18,9 @@ type fakeBrowser struct {
 
 func (b *fakeBrowser) PrepareWABA(
 	ctx context.Context,
-	businessID, name string,
+	jobID, businessID, name string,
 ) error {
+	b.jobID = jobID
 	b.businessID = businessID
 	b.name = name
 	b.calls++
@@ -48,6 +50,10 @@ func TestRunPreparesWABAAndAwaitsManualAction(t *testing.T) {
 
 	if browser.name != task.Name {
 		t.Errorf("name yang dikirim ke browser tidak sesuai")
+	}
+
+	if browser.jobID != task.ID {
+		t.Error("job ID yang dikirim ke browser tidak sesuai")
 	}
 
 	if task.Status() != job.StatusAwaitingManualAction {
@@ -159,7 +165,7 @@ type blockingBrowser struct {
 
 func (b *blockingBrowser) PrepareWABA(
 	ctx context.Context,
-	businessID, name string,
+	jobID, businessID, name string,
 ) error {
 	close(b.started)
 
@@ -216,7 +222,7 @@ type cancellingBrowser struct {
 
 func (b *cancellingBrowser) PrepareWABA(
 	ctx context.Context,
-	businessID, name string,
+	jobID, businessID, name string,
 ) error {
 	b.cancel()
 	return nil
